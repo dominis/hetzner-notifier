@@ -1,5 +1,4 @@
 var $ = require("cheerio");
-var nodemailer = require("nodemailer");
 var rc = require("rc");
 var request = require("request");
 var Slack = require('slack-node');
@@ -48,14 +47,32 @@ request.get(countryUrl, function () {
       process.exit(2);
     }
     var lowestPrice = $(body).find(".order_price").eq(2).text().split(" ")[1];
-    if (Number(lowestPrice) <= config.threshold) {
+    var highestCpuB = 0;
+    $(body).find(".order_cpu_benchmark").each(function(i, node) {
+      if (i < 3) { // ignore table headers
+        return true;
+      }
+
+      // only check cpu bench for the ones which are in the budget
+      item_price = $(body).find(".order_price").eq(i).text().split(" ")[1]
+      if (parseInt(item_price) <= config.threshold) {
+        b = $(node).text();
+        if (parseInt(b) > parseInt(highestCpuB)) {
+          highestCpuB = b;
+        }
+      }
+    });
+
+    if (parseInt(lowestPrice) <= config.threshold) {
       var msgOptions = {
-          text: util.format("Hetzner server (ram: %s GB, hdnr: %s, hdsize: %s GB, text: %s) dropped under %s EUR",
+          text: util.format("Hetzner server (ram: %s GB, hdnr: %s, hdsize: %s GB, text: %s) dropped under %s EUR. Highest CPU bench: %s",
             config.ram,
             config.hdnr,
             config.hdsize,
             config.text,
-            config.threshold)
+            config.threshold,
+            highestCpuB
+            )
 
       };
       slack.webhook({
@@ -64,7 +81,7 @@ request.get(countryUrl, function () {
         text: msgOptions.text
       }, function(err, response) {});
     } else {
-      console.log("Nothing found. The cheapest deal is " + lowestPrice);
+      console.log("Nothing found. The cheapest deal is " + parseInt(lowestPrice));
     }
   });
 });
