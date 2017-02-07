@@ -2,6 +2,8 @@ var $ = require("cheerio");
 var nodemailer = require("nodemailer");
 var rc = require("rc");
 var request = require("request");
+var Slack = require('slack-node');
+var util = require('util')
 
 var config = rc("hetzner-notifier", {
     country: "US",
@@ -9,13 +11,7 @@ var config = rc("hetzner-notifier", {
     hdnr: "",
     hdsize: "",
     text: "",
-    smtp_host: "",
-    smtp_port: 25,
-    smtp_username: "",
-    smtp_password: "",
-    smtp_accept_unauthorized: false,
-    email_from: "hetzner@me.com",
-    email_to: "",
+    slack_webhook_url: "",
     threshold: 30
 });
 
@@ -33,30 +29,15 @@ var formData = {
   limit: "100"
 };
 
-if (!config.smtp_host) {
-  console.error("Please specity SMTP host");
+if (!config.slack_webhook_url) {
+  console.error("Please specity the Slack hook url");
   process.exit(1);
 }
-
-if (!config.email_to) {
-  console.error("Please specify the email address to send notifications to");
-  process.exit(1);
-}
-
-var transporter = nodemailer.createTransport({
-    host: config.smtp_host,
-    port: config.smtp_port,
-    auth: {
-        user: config.smtp_username,
-        pass: config.smtp_password
-    },
-    tls: {
-        rejectUnauthorized: !config.smtp_accept_unauthorized
-    }
-});
 
 var jar = request.jar();
 request = request.defaults({jar: jar});
+slack = new Slack();
+slack.setWebhook(config.slack_webhook_url);
 
 // We go to the country page first, because the pricing is dependent on the country the visitor
 // chooses. By going to the page, a cookie is set so that subsequent search gets the correct prices
@@ -68,20 +49,20 @@ request.get(countryUrl, function () {
     }
     var lowestPrice = $(body).find(".order_price").eq(2).text().split(" ")[1];
     if (Number(lowestPrice) <= config.threshold) {
-      var mailOptions = {
-          from: config.email_from, // sender address
-          to: config.email_to, // list of receivers
-          subject: "Hetzner Server deal found", // Subject line
-          text: "Hetzner server dropped under " + config.threshold, // plaintext body
+      var msgOptions = {
+          text: util.format("Hetzner server (ram: %s GB, hdnr: %s, hdsize: %s GB, text: %s) dropped under %s EUR",
+            config.ram,
+            config.hdnr,
+            config.hdsize,
+            config.text,
+            config.threshold)
+
       };
-      transporter.sendMail(mailOptions, function(error, info){
-        if (error) {
-            console.error("Error sending email notification: " + error);
-            process.exit(3);
-        } else {
-            console.log('Email notification sent: ' + info.response);
-        }
-      });
+      slack.webhook({
+        channel: "#general",
+        username: "hetzner-notifier",
+        text: msgOptions.text
+      }, function(err, response) {});
     } else {
       console.log("Nothing found. The cheapest deal is " + lowestPrice);
     }
